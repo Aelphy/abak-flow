@@ -231,4 +231,15 @@ module Abak::Flow
       end
     end
   end
+
+  command :clean do |c|
+    c.syntax = 'git request clean'
+    c.description = 'Очистить репозитории (local и origin) от мусорных веток'
+
+    c.option '--hard', 'Дополнительно удалить ветки, помеченные как ветки для потенциального удаления'
+
+    c.action do |args, options|
+      # options.hard
+    end
+  end
 end

@@ -239,7 +239,51 @@ module Abak::Flow
     c.option '--hard', 'Дополнительно удалить ветки, помеченные как ветки для потенциального удаления'
 
     c.action do |args, options|
-      # options.hard
+      config  = Abak::Flow::Config.current
+      github_client = Abak::Flow::GithubClient.connect(config)
+      request = Abak::Flow::PullRequest.new(config, :strategy => :status)
+
+      exit unless request.valid?
+
+      say "=> Обновляю данные о репозитории upstream"
+      %w(origin upstream).each { |remote| Hub::Runner.execute('fetch', remote, '-p') }
+
+      say "=> Загружаю список веток для origin"
+      branches = github_client.branches(request.origin_project).
+                               reject { |branch| %w(master develop).include? branch.name }
+
+      say "=> На origin найдено веток: #{branches.count}"
+      branches_for_remove = []
+      branches.each_with_index do |branch, index|
+        index += 1
+
+        base = Abak::Flow::PullRequest.branch_by_prefix branch.name.split('/').first
+
+        upstream_branch = %x(git branch -r --contain #{branch.commit.sha} | grep upstream/#{base} 2> /dev/null).strip
+        local_sha = %x(git show #{branch.name} --format=%H --no-notes 2> /dev/null | head -n 1).strip
+
+        statuses = {
+          unused: upstream_branch.empty?,
+          differ: !local_sha.empty? && local_sha != branch.commit.sha,
+          missing: local_sha.empty?
+        }
+
+        if !statuses.values.inject(&:|) || (options.hard && statuses.select { |_,bool| bool }.keys == [:missing])
+          branches_for_remove << branch.name
+        end
+      end
+      
+      if branches_for_remove.empty?
+        say "Кажется удалять и нечего"
+        exit
+      end
+
+      say "=> Удаляю ветки на origin"
+      Hub::Runner.execute('push', 'origin', *branches_for_remove.map { |b| ":#{b}"})
+      
+      say "=> Удаляю локальные ветки"
+      Hub::Runner.execute('branch', '-D', *branches_for_remove)
     end
   end
+
 end
